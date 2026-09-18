@@ -1,0 +1,85 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Add Android platform (Capacitor)
+        run: npx cap add android
+
+      - name: Sync Capacitor (copy www into native project)
+        run: npx cap sync android
+
+      - name: Apply leaf app icon
+        run: |
+          test -f app-icons.zip || { echo "app-icons.zip not found in repo root"; exit 1; }
+          unzip -o app-icons.zip -d android/app/src/main/res
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Restore release keystore
+        env:
+          KS_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS_B64" | base64 -d > android/app/release.keystore
+
+      - name: Configure release signing
+        working-directory: android
+        run: |
+          cat >> app/build.gradle << 'EOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("release.keystore")
+                      storePassword System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("RELEASE_KEY_ALIAS")
+                      keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Upload release APK as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant-app-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
