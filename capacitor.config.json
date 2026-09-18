@@ -1,6 +1,6 @@
 {
   "appId": "ir.otapp.rehab",
-  "appName": "دستیار درمانگر",
+  "appName": "توانگر",
   "webDir": "www",
   "server": {
     "androidScheme": "https",
